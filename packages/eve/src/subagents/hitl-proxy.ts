@@ -4,7 +4,7 @@ import { resolveInputOutcome } from "#harness/input-request-resolution.js";
 import { firstOpenInput } from "#harness/open-input-request.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests, resolvedByChild } from "#harness/proxy-input-requests.js";
 import type { WorkflowAskRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
 import type { InputResolution } from "#protocol/message.js";
@@ -164,7 +164,11 @@ export function routeDeliverPayload(input: {
       routes,
     }): RoutedChildDelivery => {
       const responseIds = new Set(parentRequestIds);
-      const retireRequestIds = new Set(responseIds);
+      const decided = (requestId: string) => {
+        const kind = entries.get(requestId)?.kind;
+        return kind === undefined || !resolvedByChild(kind);
+      };
+      const retireRequestIds = new Set([...responseIds].filter(decided));
 
       // A fully-answered approval batch retires its sibling requests
       // too, so a late free-form answer cannot route through a stale
@@ -174,7 +178,9 @@ export function routeDeliverPayload(input: {
           route.batch !== undefined &&
           batchResolves({ batch: route.batch, childContinuationToken, entries, responseIds })
         ) {
-          for (const requestId of route.batch.requestIds) retireRequestIds.add(requestId);
+          for (const requestId of route.batch.requestIds) {
+            if (decided(requestId)) retireRequestIds.add(requestId);
+          }
         }
       }
 

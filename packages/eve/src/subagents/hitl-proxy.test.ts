@@ -485,10 +485,12 @@ describe("routeDeliverPayload message resolution", () => {
         childContinuationToken: "child-token",
         message: "approve",
         payload: { inputResponses: [{ optionId: "approve", requestId: "approve-1" }] },
-        resolved: { resolutions: [{ outcome: "approved", requestId: "approve-1" }] },
+        // The child decides the approval; the parent closes it on the child's settlement.
+        resolved: { resolutions: [] },
       },
     ]);
 
+    // The child settled approve-1, which retires its route.
     const second = routeDeliverPayload({
       payload: { message: "cancel" },
       resolveMessage: true,
@@ -497,7 +499,7 @@ describe("routeDeliverPayload message resolution", () => {
     expect(second.forChildren).toMatchObject([
       {
         payload: { inputResponses: [{ optionId: "cancel", requestId: "approve-2" }] },
-        resolved: { resolutions: [{ outcome: "denied", requestId: "approve-2" }] },
+        resolved: { resolutions: [] },
       },
     ]);
   });
