@@ -5,6 +5,7 @@ import type {
 } from "#compiled/@vercel/schedules/index.js";
 
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { isVercelSchedulesDevEnvironment } from "#internal/schedules/dev-environment.js";
 import type {
   ScheduleExpression,
   SchedulePage,
@@ -35,7 +36,7 @@ export interface VercelScheduleProviderOptions {
 export function vercelScheduleProvider(
   options: VercelScheduleProviderOptions = {},
 ): ScheduleProvider {
-  if (isEveDevEnvironment()) return DEVELOPMENT_PROVIDER;
+  if (isEveDevEnvironment() && !isVercelSchedulesDevEnvironment()) return DEVELOPMENT_PROVIDER;
 
   const client = (signal: AbortSignal) => createClient(options, signal);
 
@@ -189,6 +190,7 @@ function isNotFoundError(error: unknown): boolean {
 }
 
 function assertSupportedVercelEnvironment(): void {
+  if (isVercelSchedulesDevEnvironment()) return;
   if (!process.env.VERCEL?.trim()) {
     throw new Error("vercelScheduleProvider() requires a Vercel production deployment or eve dev.");
   }
