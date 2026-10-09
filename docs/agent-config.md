@@ -152,6 +152,29 @@ the agent-level setting for that selection. Omitting it inherits the agent setti
 
 Run `eve set model --reasoning high` to update this field from the command line.
 
+## Prompt caching
+
+eve caches prompts automatically for AI Gateway models and for Anthropic models
+it recognizes by provider or model id. Set `modelOptions.promptCache` on a
+directly called model to mark an unrecognized model as Anthropic (such as a
+Bedrock application inference profile) or to use a 1-hour cache:
+
+```ts title="agent/agent.ts"
+import { bedrock } from "@ai-sdk/amazon-bedrock";
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: bedrock(process.env.BEDROCK_INFERENCE_PROFILE_ARN!),
+  modelContextWindowTokens: 200_000,
+  modelOptions: {
+    promptCache: { anthropic: { ttl: "1h" } }, // or { anthropic: {} } for the default 5m
+  },
+});
+```
+
+Not every Claude model supports a 1-hour cache. eve rejects `promptCache` on
+Gateway models; use `providerOptions.gateway.caching` instead.
+
 ## Compaction
 
 Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `thresholdPercent` to compact sooner:
@@ -369,7 +392,7 @@ it falls back to the World's default retention period.
 | Field          | Type                                  | Default          | Description                                                                                                                                                                                                                                                                                                                          |
 | -------------- | ------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                                        |
-| `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                                                                                                               |
+| `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, and [`promptCache`](#prompt-caching) settings.                                                                                                                                                                                                                                |
 | `limits`       | `AgentLimitsDefinition`               | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                                                                                                          |
 | `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data.                                                                            |
 | `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                                                                             |
