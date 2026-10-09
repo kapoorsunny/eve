@@ -497,10 +497,6 @@ function getMockResponseMessages(result: Record<string, unknown>): Record<string
     : [];
 }
 
-function createMockGenerateResult(result: Record<string, unknown>): Record<string, unknown> {
-  return { ...result, responseMessages: getMockResponseMessages(result) };
-}
-
 async function* createExplicitMockFullStream(
   parts: readonly Record<string, unknown>[],
 ): AsyncIterable<Record<string, unknown>> {
@@ -646,12 +642,6 @@ function setupMockAgent(result: Record<string, unknown>): void {
   ) {
     const { onStepEnd } = settings;
 
-    this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-      await invokeMockStepStart(settings, options);
-      if (onStepEnd) await onStepEnd(result);
-      return createMockGenerateResult(result);
-    });
-
     this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
       await invokeMockStepStart(settings, options);
       const mockResult = createMockStreamResult(result);
@@ -678,11 +668,6 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
       throw new Error("ToolLoopAgent mock exhausted its scripted results.");
     }
     const { onStepEnd } = settings;
-    this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-      await invokeMockStepStart(settings, options);
-      if (onStepEnd) await onStepEnd(result);
-      return createMockGenerateResult(result);
-    });
     this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
       await invokeMockStepStart(settings, options);
       const mockResult = createMockStreamResult(result);
@@ -891,7 +876,6 @@ function setupMockAgentError(error: Error): void {
     this: Record<string, unknown>,
     _settings: MockAgentSettings,
   ) {
-    this.generate = vi.fn().mockRejectedValue(error);
     this.stream = vi.fn().mockRejectedValue(error);
     return this as unknown as ToolLoopAgent;
   } as unknown as MockAgentConstructor);
@@ -1303,9 +1287,9 @@ describe("createToolLoopHarness", () => {
     );
 
     const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-      generate: ReturnType<typeof vi.fn>;
+      stream: ReturnType<typeof vi.fn>;
     };
-    expect(agent.generate.mock.calls[0]?.[0].messages).toEqual([
+    expect(agent.stream.mock.calls[0]?.[0].messages).toEqual([
       { content: [{ text: "Previous reply", type: "text" }], role: "assistant" },
       { content: "Continue", kind: "user" as const, role: "user" },
     ]);
@@ -3333,7 +3317,7 @@ describe("createToolLoopHarness", () => {
     },
   );
 
-  it("throws a distinct content-filter error on the non-streaming path without reissue", async () => {
+  it("throws a distinct content-filter error without reissue", async () => {
     setupMockAgent({
       finishReason: "content-filter",
       providerMetadata: { gateway: { generationId: "gen_filtered" } },
@@ -4149,7 +4133,6 @@ describe("createToolLoopHarness", () => {
     });
     vi.mocked(ToolLoopAgent).mockImplementation(function (this: ToolLoopAgent) {
       this.stream = streamMock;
-      this.generate = streamMock;
       return this;
     } as MockAgentConstructor);
 
@@ -4189,7 +4172,7 @@ describe("createToolLoopHarness", () => {
       settings: MockAgentSettings,
     ) {
       const { onStepEnd, prepareStep } = settings;
-      this.generate = modelCallMock.mockImplementation(async (options: { messages: unknown[] }) => {
+      this.stream = modelCallMock.mockImplementation(async (options: { messages: unknown[] }) => {
         if (prepareStep) {
           await prepareStep({
             context: undefined,
@@ -4205,9 +4188,8 @@ describe("createToolLoopHarness", () => {
         if (onStepEnd) {
           void Promise.resolve().then(() => onStepEnd(success));
         }
-        return createMockGenerateResult(success);
+        return createMockStreamResult(success);
       });
-      this.stream = vi.fn();
       return this;
     } as MockAgentConstructor);
 
@@ -4363,7 +4345,6 @@ describe("createToolLoopHarness", () => {
     const streamMock = vi.fn();
     vi.mocked(ToolLoopAgent).mockImplementation(function (this: ToolLoopAgent) {
       this.stream = streamMock;
-      this.generate = streamMock;
       return this;
     } as MockAgentConstructor);
 
@@ -4780,18 +4761,6 @@ describe("createToolLoopHarness", () => {
           // upstream rejection arrives. Mirror that ordering in the
           // mock so the test can assert step.started is emitted
           // exactly once across the original + retry attempts.
-          this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-            if (prepareStep) {
-              await prepareStep({
-                messages: options.messages,
-                steps: [],
-                stepNumber: 0,
-                model: {},
-                context: undefined,
-              });
-            }
-            throw input.failure;
-          });
           this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
             if (prepareStep) {
               await prepareStep({
@@ -4805,19 +4774,6 @@ describe("createToolLoopHarness", () => {
             throw input.failure;
           });
         } else {
-          this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-            if (prepareStep) {
-              await prepareStep({
-                messages: options.messages,
-                steps: [],
-                stepNumber: 0,
-                model: {},
-                context: undefined,
-              });
-            }
-            if (onStepEnd) await onStepEnd(input.successResult);
-            return input.successResult;
-          });
           this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
             if (prepareStep) {
               await prepareStep({
@@ -7679,14 +7635,14 @@ describe("createToolLoopHarness", () => {
   });
 
   it("consumes text approval shortcuts without appending them as user messages", async () => {
-    const generateCalls: unknown[] = [];
+    const streamCalls: unknown[] = [];
 
     vi.mocked(ToolLoopAgent).mockImplementation(function (
       this: Record<string, unknown>,
       settings: MockAgentSettings,
     ) {
       const { onStepEnd, prepareStep } = settings;
-      this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
+      this.stream = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
         if (prepareStep) {
           await prepareStep({
             messages: input.messages,
@@ -7696,7 +7652,7 @@ describe("createToolLoopHarness", () => {
             context: undefined,
           });
         }
-        generateCalls.push(input.messages);
+        streamCalls.push(input.messages);
         const result = {
           finishReason: "stop",
           response: { messages: [{ content: "Approved.", role: "assistant" }] },
@@ -7705,7 +7661,7 @@ describe("createToolLoopHarness", () => {
           toolResults: [],
         };
         if (onStepEnd) await onStepEnd(result);
-        return createMockGenerateResult(result);
+        return createMockStreamResult(result);
       });
       return this as unknown as ToolLoopAgent;
     } as unknown as ConstructorParameters<typeof ToolLoopAgent> extends [infer S]
@@ -7782,7 +7738,7 @@ describe("createToolLoopHarness", () => {
     await createToolLoopHarness(config)(session, { message: "approve" });
 
     // The answer runs the call; the model reads its result, never the text that approved it.
-    expect(generateCalls[0]).toEqual([
+    expect(streamCalls[0]).toEqual([
       {
         content: expect.stringContaining("[Pending approvals]"),
         kind: "context.state",
@@ -8582,9 +8538,9 @@ describe("createToolLoopHarness", () => {
     // Verify the model received the continuation user message, not the
     // trailing assistant.
     const instance = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value as {
-      generate: ReturnType<typeof vi.fn>;
+      stream: ReturnType<typeof vi.fn>;
     };
-    const modelMessages = instance.generate.mock.calls[0]?.[0] as {
+    const modelMessages = instance.stream.mock.calls[0]?.[0] as {
       messages: Array<{ role: string; content: unknown }>;
     };
     expect(modelMessages.messages.at(-1)).toEqual({
@@ -8631,9 +8587,9 @@ describe("createToolLoopHarness", () => {
           | PromptAgentSettings
           | undefined;
         const instance = vi.mocked(ToolLoopAgent).mock.results[index]?.value as
-          | { generate: ReturnType<typeof vi.fn> }
+          | { stream: ReturnType<typeof vi.fn> }
           | undefined;
-        const call = instance?.generate.mock.calls[0]?.[0] as
+        const call = instance?.stream.mock.calls[0]?.[0] as
           | { messages: CapturedModelCall["messages"] }
           | undefined;
         if (settings === undefined || call === undefined) {
@@ -10435,18 +10391,15 @@ describe("createToolLoopHarness", () => {
       expect(historyRef.size).toBe(imageBytes.byteLength);
       expect(historyRef.path).toMatch(/^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/logo\.png$/);
 
-      // --- Invariant 3: the mocked ToolLoopAgent.generate saw hydrated bytes.
+      // --- Invariant 3: the mocked ToolLoopAgent.stream saw hydrated bytes.
       //
-      // The mock constructor ran once; grab the generate spy (no `emit`
-      // was passed on the config, so the harness takes the non-streaming
-      // branch) and verify the messages it received had `data: Buffer`
-      // for the FilePart.
+      // The mock constructor ran once; grab the stream spy and verify the
+      // messages it received had `data: Buffer` for the FilePart.
       const mockInstance = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-        generate: ReturnType<typeof vi.fn>;
         stream: ReturnType<typeof vi.fn>;
       };
       expect(mockInstance).toBeDefined();
-      const modelCall = mockInstance.generate.mock.calls[0]?.[0] as {
+      const modelCall = mockInstance.stream.mock.calls[0]?.[0] as {
         messages: Array<{
           content: Array<{ type: string; data?: unknown; mediaType?: string }>;
         }>;
@@ -10528,8 +10481,7 @@ describe("createToolLoopHarness", () => {
         .mock.results.slice(1)
         .map(
           (result) =>
-            (result.value as { generate: ReturnType<typeof vi.fn> }).generate.mock
-              .calls[0]?.[0] as {
+            (result.value as { stream: ReturnType<typeof vi.fn> }).stream.mock.calls[0]?.[0] as {
               messages: ModelMessage[];
             },
         );
@@ -10608,9 +10560,9 @@ describe("createToolLoopHarness", () => {
       expect(sandbox.writes).toHaveLength(1);
       expect(JSON.stringify(result.session.history)).not.toContain(base64);
       const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as
-        | { generate: ReturnType<typeof vi.fn> }
+        | { stream: ReturnType<typeof vi.fn> }
         | undefined;
-      const modelCall = agent?.generate.mock.calls[0]?.[0] as { messages: ModelMessage[] };
+      const modelCall = agent?.stream.mock.calls[0]?.[0] as { messages: ModelMessage[] };
       expect(JSON.stringify(modelCall.messages)).toContain(base64);
     });
 
@@ -10661,10 +10613,9 @@ describe("createToolLoopHarness", () => {
       // The model-facing content swapped the non-inlinable FilePart
       // for a TextPart naming the sandbox path.
       const mockInstance = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-        generate: ReturnType<typeof vi.fn>;
         stream: ReturnType<typeof vi.fn>;
       };
-      const modelCall = mockInstance.generate.mock.calls[0]?.[0] as {
+      const modelCall = mockInstance.stream.mock.calls[0]?.[0] as {
         messages: Array<{
           content: Array<{ type: string; text?: string; data?: unknown }>;
         }>;
@@ -10692,10 +10643,9 @@ describe("createToolLoopHarness", () => {
         instructions: unknown;
       };
       const instance = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value as {
-        generate: ReturnType<typeof vi.fn>;
         stream: ReturnType<typeof vi.fn>;
       };
-      const call = (instance.generate.mock.calls[0]?.[0] ?? instance.stream.mock.calls[0]?.[0]) as {
+      const call = instance.stream.mock.calls[0]?.[0] as {
         messages: Array<{ role: string; content: unknown }>;
       };
       return { instructions: settings.instructions, messages: call.messages };
